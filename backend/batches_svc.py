@@ -6,7 +6,12 @@ import json
 from fastapi import APIRouter, HTTPException
 
 from auth import AuthHeader, require_user, require_writer
-from db import connect, now_iso, write_audit
+from db import (
+    connect,
+    now_iso,
+    occupancy_open_for_batch,
+    write_audit,
+)
 from locks import release, require_lock
 from models import BatchIn
 from validators import summarize_points, validate_probe_online, validate_temp_point
@@ -76,10 +81,13 @@ def get_batch(batch_id: int, authorization: AuthHeader = None):
             "SELECT * FROM seal_snapshots WHERE batch_id=? ORDER BY id DESC",
             (batch_id,),
         ).fetchall()
+        # 单轨：批次视图开放计数与游标页、仓间页同源
+        open_count = occupancy_open_for_batch(conn, batch_id)
         return {
             "batch": data,
             "excursions": [dict(e) for e in exc],
             "seals": [dict(s) for s in seals],
+            "open_excursion_count": open_count,
         }
 
 

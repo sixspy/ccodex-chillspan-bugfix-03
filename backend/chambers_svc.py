@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from auth import AuthHeader, require_user, require_writer
-from db import connect, now_iso, write_audit
+from db import connect, now_iso, occupancy_open_for_chamber, write_audit
 from models import ChamberIn
 
 router = APIRouter(tags=["chambers"])
@@ -49,13 +49,8 @@ def get_chamber(chamber_id: int, authorization: AuthHeader = None):
                WHERE chamber_id=? AND status NOT IN ('已封批','作废')""",
             (chamber_id,),
         ).fetchone()["c"]
-        # BUGFIX-03 埋雷：开放游标计数含已闭，永不随关闭递减
-        open_exc = conn.execute(
-            """SELECT COUNT(*) c FROM excursion_cursors e
-               JOIN temp_batches b ON b.id=e.batch_id
-               WHERE b.chamber_id=?""",
-            (chamber_id,),
-        ).fetchone()["c"]
+        # 单轨：仓间开放游标计数只认占用表，关游标同事务扣减后此处即降
+        open_exc = occupancy_open_for_chamber(conn, chamber_id)
         return {
             "chamber": dict(ch),
             "probes": [dict(p) for p in probes],

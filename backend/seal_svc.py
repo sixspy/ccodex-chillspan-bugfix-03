@@ -6,7 +6,7 @@ import json
 from fastapi import APIRouter, HTTPException
 
 from auth import AuthHeader, require_user, require_writer
-from db import connect, now_iso, write_audit
+from db import connect, now_iso, occupancy_open_for_batch, write_audit
 from locks import release, require_lock
 from models import SealIn
 from validators import require_calibration_fresh, validate_batch_sealable
@@ -40,11 +40,8 @@ def seal_batch(body: SealIn, authorization: AuthHeader = None):
             ).fetchone()
             if not batch:
                 raise HTTPException(404, "批次不存在")
-            open_exc = conn.execute(
-                """SELECT COUNT(*) c FROM excursion_cursors
-                   WHERE batch_id=? AND status='开放'""",
-                (body.batch_id,),
-            ).fetchone()["c"]
+            # 单轨：封批闸门只认占用表开放计数
+            open_exc = occupancy_open_for_batch(conn, body.batch_id)
             bdict = dict(batch)
             bdict["temp_points"] = batch["temp_points"]
             validate_batch_sealable(bdict, open_exc)

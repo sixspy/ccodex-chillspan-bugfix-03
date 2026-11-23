@@ -48,6 +48,7 @@ createApp({
     const routes = ref([]);
     const carrierJobs = ref([]);
     const thawJobs = ref([]);
+    const spectrumSummary = ref({ open_excursions: 0 });
     const dash = ref({});
 
     const chamberDetail = ref(null);
@@ -129,6 +130,14 @@ createApp({
     );
     const sealedBatches = computed(() =>
       batches.value.filter((b) => b.status === "已封批")
+    );
+    // 游标视图开放计数：单轨后端读数，与仓间/批次/温谱/对账四页同源
+    const openExcursionCount = computed(
+      () => excursions.value.filter((e) => e.status === "开放").length
+    );
+    // 温谱视图开放计数：取自温谱服务汇总，应与游标视图一致
+    const spectrumOpenCount = computed(
+      () => spectrumSummary.value.open_excursions || 0
     );
 
     function fmtTemp(n) {
@@ -218,6 +227,9 @@ createApp({
         dash.value = d || {};
         carrierJobs.value = cj.items || [];
         thawJobs.value = tj.items || [];
+        spectrumSummary.value = {
+          open_excursions: sp.open_excursions || 0,
+        };
 
         if (chambers.value.length && !probeForm.value.chamber_id) {
           probeForm.value.chamber_id = chambers.value[0].id;
@@ -494,6 +506,8 @@ createApp({
       openableBatches,
       sealableBatches,
       sealedBatches,
+      openExcursionCount,
+      spectrumOpenCount,
       login,
       logout,
       refresh,

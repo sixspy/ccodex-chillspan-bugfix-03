@@ -159,6 +159,15 @@ CREATE TABLE IF NOT EXISTS chamber_locks(
   holder TEXT NOT NULL,
   acquired_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS chamber_excursion_occupancy(
+  chamber_id INTEGER NOT NULL,
+  batch_id INTEGER NOT NULL,
+  open_count INTEGER NOT NULL DEFAULT 0 CHECK(open_count >= 0),
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(chamber_id, batch_id),
+  FOREIGN KEY(chamber_id) REFERENCES cold_chambers(id),
+  FOREIGN KEY(batch_id) REFERENCES temp_batches(id)
+);
 CREATE TABLE IF NOT EXISTS contention_log(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   lock_key TEXT NOT NULL,
@@ -202,6 +211,59 @@ def write_audit(conn: sqlite3.Connection, actor: str, action: str, target: str, 
            VALUES (?,?,?,?,?)""",
         (actor, action, target, json.dumps(payload, ensure_ascii=False), now_iso()),
     )
+
+
+# ---- 单轨正式开放游标计数（chamber_excursion_occupancy 为唯一写口） ----
+
+def occupancy_open_for_batch(conn: sqlite3.Connection, batch_id: int) -> int:
+    row = conn.execute(
+        "SELECT COALESCE(open_count,0) c FROM chamber_excursion_occupancy WHERE batch_id=?",
+        (batch_id,),
+    ).fetchone()
+    return int(row["c"]) if row else 0
+
+
+def occupancy_open_for_chamber(conn: sqlite3.Connection, chamber_id: int) -> int:
+    row = conn.execute(
+        "SELECT COALESCE(SUM(open_count),0) c FROM chamber_excursion_occupancy "
+        "WHERE chamber_id=?",
+        (chamber_id,),
+    ).fetchone()
+    return int(row["c"])
+
+
+def occupancy_open_total(conn: sqlite3.Connection) -> int:
+    row = conn.execute(
+        "SELECT COALESCE(SUM(open_count),0) c FROM chamber_excursion_occupancy"
+    ).fetchone()
+    return int(row["c"])
+
+
+def occupancy_increment(conn: sqlite3.Connection, chamber_id: int, batch_id: int) -> None:
+    """开游标同事务零改加一（CHECK 约束兜底，禁止越过非负）。"""
+    conn.execute(
+        """INSERT INTO chamber_excursion_occupancy(chamber_id,batch_id,open_count,updated_at)
+           VALUES (?,?,1,?)
+           ON CONFLICT(chamber_id,batch_id) DO UPDATE SET
+             open_count=open_count+1, updated_at=excluded.updated_at""",
+        (chamber_id, batch_id, now_iso()),
+    )
+
+
+def occupancy_guard_decrement(
+    conn: sqlite3.Connection, chamber_id: int, batch_id: int
+) -> bool:
+    """关游标同事务守卫式零改减一：仅当计数为正才扣，永不为负。
+
+    返回 False 表示偏航（计数已为零或占用行缺失），调用方须回滚关闭并留痕。
+    """
+    cur = conn.execute(
+        """UPDATE chamber_excursion_occupancy SET open_count=open_count-1,
+               updated_at=?
+           WHERE chamber_id=? AND batch_id=? AND open_count>0""",
+        (now_iso(), chamber_id, batch_id),
+    )
+    return cur.rowcount == 1
 
 
 def _load_json(name: str):
@@ -398,6 +460,23 @@ def seed_lineage_samples(conn: sqlite3.Connection) -> None:
     )
 
 
+def seed_occupancy(conn: sqlite3.Connection) -> None:
+    """按现存开放游标回填单轨占用计数（只补缺，不覆盖运行态）。"""
+    rows = conn.execute(
+        """SELECT b.chamber_id, e.batch_id, COUNT(*) c
+           FROM excursion_cursors e JOIN temp_batches b ON b.id=e.batch_id
+           WHERE e.status='开放'
+           GROUP BY b.chamber_id, e.batch_id"""
+    ).fetchall()
+    for r in rows:
+        conn.execute(
+            """INSERT INTO chamber_excursion_occupancy(chamber_id,batch_id,open_count,updated_at)
+               VALUES (?,?,?,?)
+               ON CONFLICT(chamber_id,batch_id) DO NOTHING""",
+            (r["chamber_id"], r["batch_id"], int(r["c"]), now_iso()),
+        )
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
@@ -406,6 +485,7 @@ def init_db() -> None:
         seed_probes(conn)
         seed_batches(conn)
         seed_excursions(conn)
+        seed_occupancy(conn)
         seed_calibrations(conn)
         seed_routes(conn)
         seed_lineage_samples(conn)
@@ -416,9 +496,8 @@ def dashboard_stats(conn: sqlite3.Connection) -> dict:
     chambers = conn.execute("SELECT COUNT(*) c FROM cold_chambers").fetchone()["c"]
     probes = conn.execute("SELECT COUNT(*) c FROM probes").fetchone()["c"]
     batches = conn.execute("SELECT COUNT(*) c FROM temp_batches").fetchone()["c"]
-    open_exc = conn.execute(
-        "SELECT COUNT(*) c FROM excursion_cursors WHERE status='开放'"
-    ).fetchone()["c"]
+    # 单轨：开放游标计数只认占用表，游标视图须与其一致
+    open_exc = occupancy_open_total(conn)
     sealed = conn.execute(
         "SELECT COUNT(*) c FROM temp_batches WHERE status='已封批'"
     ).fetchone()["c"]

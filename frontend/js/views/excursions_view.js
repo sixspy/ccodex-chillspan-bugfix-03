@@ -2,6 +2,7 @@ export const excursionsViewTemplate = `
 <section class="panel">
   <h2>超温游标</h2>
   <p class="hint">温度点超阈后开游标；须全部闭环才能封批。</p>
+  <p class="hint">当前开放游标 <span class="badge" :class="openExcursionCount ? 'fail' : 'pass'">{{ openExcursionCount }}</span>（与仓间、批次、温谱、对账四页同源）</p>
   <div class="form-row">
     <div><label>批次</label>
       <select v-model.number="excOpenForm.batch_id"><option v-for="b in openableBatches" :key="b.id" :value="b.id">{{ b.batch_code }}</option></select>

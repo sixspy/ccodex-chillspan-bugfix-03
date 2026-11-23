@@ -2,6 +2,7 @@ export const spectrumViewTemplate = `
 <section class="panel">
   <h2>温谱导出</h2>
   <p class="hint">仅已封批批次可导出；同代重复导出将被拒绝。</p>
+  <p class="hint">当前开放游标 <span class="badge" :class="spectrumOpenCount ? 'fail' : 'pass'">{{ spectrumOpenCount }}</span>（与游标、仓间、批次、对账四页同源）</p>
   <div class="form-row">
     <div><label>已封批批次</label>
       <select v-model.number="spectrumForm.batch_id"><option v-for="b in sealedBatches" :key="b.id" :value="b.id">{{ b.batch_code }} G{{ b.generation }}</option></select>

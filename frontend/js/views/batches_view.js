@@ -34,7 +34,7 @@ export const batchesViewTemplate = `
   </table>
   <div v-if="batchDetail" class="detail-box">
     <h3>{{ batchDetail.batch.batch_code }} · {{ batchDetail.batch.cargo_ref }}</h3>
-    <p>点数 {{ batchDetail.batch.temp_points.length }} · 游标 {{ batchDetail.excursions.length }} 条</p>
+    <p>点数 {{ batchDetail.batch.temp_points.length }} · 游标 {{ batchDetail.excursions.length }} 条 · <span class="badge" :class="batchDetail.open_excursion_count ? 'fail' : 'pass'">开放游标 {{ batchDetail.open_excursion_count }}</span></p>
   </div>
 </section>
 `;

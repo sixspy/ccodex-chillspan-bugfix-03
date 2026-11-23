@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from auth import AuthHeader, require_user
-from db import connect
+from db import connect, occupancy_open_for_chamber, occupancy_open_for_batch
 
 router = APIRouter(tags=["reconcile"])
 
@@ -22,6 +22,8 @@ def _chamber_recon(conn, chamber) -> dict:
            WHERE chamber_id=? AND status='已封批'""",
         (cid,),
     ).fetchone()["c"]
+    # 单轨：对账视图开放计数与仓间页、游标页同源
+    open_exc = occupancy_open_for_chamber(conn, cid)
     gap = quota - active
     ok = active <= quota
     return {
@@ -31,6 +33,7 @@ def _chamber_recon(conn, chamber) -> dict:
         "quota_batches": quota,
         "active_batches": active,
         "sealed_batches": sealed,
+        "open_excursion_count": open_exc,
         "quota_left": gap,
         "balanced": ok,
         "proof": {
@@ -80,11 +83,8 @@ def batch_proof(batch_code: str, authorization: AuthHeader = None):
         ).fetchone()
         if not batch:
             raise HTTPException(404, "批次不存在")
-        open_exc = conn.execute(
-            """SELECT COUNT(*) c FROM excursion_cursors
-               WHERE batch_id=? AND status='开放'""",
-            (batch["id"],),
-        ).fetchone()["c"]
+        # 单轨：互证开放计数只认占用表
+        open_exc = occupancy_open_for_batch(conn, batch["id"])
         exports = conn.execute(
             """SELECT COUNT(*) c FROM spectrum_exports
                WHERE batch_id=? AND status='已导出'""",

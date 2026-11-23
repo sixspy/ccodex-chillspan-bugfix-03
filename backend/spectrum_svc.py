@@ -7,7 +7,7 @@ import json
 from fastapi import APIRouter, HTTPException
 
 from auth import AuthHeader, require_user, require_writer
-from db import connect, now_iso, write_audit
+from db import connect, now_iso, occupancy_open_total, write_audit
 from models import SpectrumIn
 
 router = APIRouter(tags=["spectrum"])
@@ -21,7 +21,11 @@ def list_exports(authorization: AuthHeader = None):
             """SELECT s.*, b.batch_code FROM spectrum_exports s
                JOIN temp_batches b ON b.id=s.batch_id ORDER BY s.id DESC"""
         ).fetchall()
-        return {"items": [dict(r) for r in rows]}
+        # 单轨：温谱视图开放计数与其他四视图同源
+        return {
+            "items": [dict(r) for r in rows],
+            "open_excursions": occupancy_open_total(conn),
+        }
 
 
 @router.post("/api/spectrum/export")
